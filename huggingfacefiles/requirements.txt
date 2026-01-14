@@ -1,0 +1,9 @@
+gradio
+hopsworks
+joblib
+pandas
+openmeteo-requests
+requests-cache
+retry-requests
+huggingface-hub
+scikit-learn
