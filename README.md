@@ -1,7 +1,7 @@
 # 🚤 Flores-Corvo Boat Forecaster (Captain Joao)
 **ID2223 Scalable Machine Learning Final Project**
 
-[![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/wenboxia/azores-boat-bot)
+[![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://f124b88f7dc56bb60e.gradio.live)
 
 ## 👤 Author Information
 * **Name:** Wenbo Xia
