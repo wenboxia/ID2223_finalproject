@@ -5,22 +5,20 @@ import pandas as pd
 import os
 import openmeteo_requests
 import requests_cache
+import requests  # 使用原生 requests
+import json
 from retry_requests import retry
-from huggingface_hub import InferenceClient
 
 # ==========================================
 # 🔐 安全配置
 # ==========================================
-# 在 Hugging Face Spaces 的 Settings -> Secrets 中配置这些密钥
-# 这样代码在云端运行时会自动读取，不需要硬编码
 if "HOPSWORKS_API_KEY" not in os.environ:
-    print("⚠️ 警告: 未检测到 HOPSWORKS_API_KEY，可能会导致登录失败。")
-
+    print("⚠️ 警告: 未检测到 HOPSWORKS_API_KEY")
 if "HF_TOKEN" not in os.environ:
-    print("⚠️ 警告: 未检测到 HF_TOKEN，LLM 可能无法响应。")
+    print("⚠️ 警告: 未检测到 HF_TOKEN")
 
 # ==========================================
-# 🧠 模型部分: 获取天气并预测风速
+# 🧠 模型部分 (ML)
 # ==========================================
 def get_weather_forecast():
     cache_session = requests_cache.CachedSession('.cache', expire_after = 3600)
@@ -35,36 +33,33 @@ def get_weather_forecast():
         "forecast_days": 7
     }
     
-    responses = openmeteo.weather_api("https://api.open-meteo.com/v1/forecast", params=params)
-    response = responses[0]
-    daily = response.Daily()
-    
-    df = pd.DataFrame({
-        "date": pd.date_range(
-            start = pd.to_datetime(daily.Time(), unit = "s", utc = True),
-            end = pd.to_datetime(daily.TimeEnd(), unit = "s", utc = True),
-            freq = pd.Timedelta(seconds = daily.Interval()),
-            inclusive = "left"
-        ),
-        "temperature_max": daily.Variables(0).ValuesAsNumpy(),
-        "precipitation": daily.Variables(1).ValuesAsNumpy(),
-        "wind_gusts": daily.Variables(2).ValuesAsNumpy(),
-        "wind_direction": daily.Variables(3).ValuesAsNumpy(),
-    })
-    df['date_str'] = df['date'].dt.strftime('%Y-%m-%d')
-    return df
+    try:
+        responses = openmeteo.weather_api("https://api.open-meteo.com/v1/forecast", params=params)
+        response = responses[0]
+        daily = response.Daily()
+        
+        df = pd.DataFrame({
+            "date": pd.date_range(
+                start = pd.to_datetime(daily.Time(), unit = "s", utc = True),
+                end = pd.to_datetime(daily.TimeEnd(), unit = "s", utc = True),
+                freq = pd.Timedelta(seconds = daily.Interval()),
+                inclusive = "left"
+            ),
+            "temperature_max": daily.Variables(0).ValuesAsNumpy(),
+            "precipitation": daily.Variables(1).ValuesAsNumpy(),
+            "wind_gusts": daily.Variables(2).ValuesAsNumpy(),
+            "wind_direction": daily.Variables(3).ValuesAsNumpy(),
+        })
+        df['date_str'] = df['date'].dt.strftime('%Y-%m-%d')
+        return df
+    except Exception as e:
+        print(f"❌ Weather API Error: {e}")
+        return pd.DataFrame()
 
 def get_prediction_summary():
-    """
-    运行 ML 模型，返回未来7天的风速预测摘要文本
-    """
-    print("🤖 Connecting to Hopsworks to download model...")
+    print("🤖 Connecting to Hopsworks...")
     try:
-        # 修改点：在 Spaces 中必须显式传入 project 和 api_key_value
-        # 只要环境变量里设置了 HOPSWORKS_API_KEY，login() 通常会自动识别，
-        # 但显式从 env 读取更稳妥。
         project = hopsworks.login(api_key_value=os.environ.get("HOPSWORKS_API_KEY"))
-        
         mr = project.get_model_registry()
         model = mr.get_model(name="azores_wind_model", version=1)
         model_dir = model.download()
@@ -73,68 +68,75 @@ def get_prediction_summary():
         trained_model = joblib.load(model_path)
         
         df = get_weather_forecast()
+        if df.empty: return "⚠️ Weather data unavailable."
+
         features = df[['temperature_max', 'precipitation', 'wind_gusts', 'wind_direction']]
-        
         preds = trained_model.predict(features)
         
         summary = ""
         for date, wind, gust in zip(df['date_str'], preds, df['wind_gusts']):
             wind_kmh = max(0, wind)
             summary += f"- {date}: Predicted Wind {wind_kmh:.1f} km/h (Gusts {gust:.1f} km/h)\n"
-        
         return summary
     except Exception as e:
         return f"Failed to fetch prediction data: {str(e)}"
 
-# 初始化
-print("⏳ Initialization: Fetching latest data and model...")
-# 注意：在 Space 构建阶段可能会失败，所以加个简单的异常处理
+# 初始化数据
+print("⏳ Initialization...")
 try:
     CACHE_FORECAST = get_prediction_summary()
-except:
-    CACHE_FORECAST = "Waiting for secrets configuration..."
-print("✅ Data ready!")
+    print("✅ Data ready!")
+except Exception as e:
+    CACHE_FORECAST = f"Error: {str(e)}"
 
 # ==========================================
-# 🗣️ LLM 部分
+# 🗣️ LLM 部分 (修复 410 Gone 错误)
 # ==========================================
 def chatbot_response(message, history):
-    client = InferenceClient(
-        "Qwen/Qwen2.5-7B-Instruct", 
-        token=os.environ.get("HF_TOKEN")
-    )
-    
+    # 1. 准备 Prompt
     system_prompt = f"""
-    You are 'Captain Joao', an experienced and humorous speedboat captain in Flores, Azores.
+    You are 'Captain Joao', a boat captain in Flores, Azores.
     
-    Here is the REAL wind forecast for the next 7 days (based on ML predictions):
+    Here is the WIND FORECAST for the next 7 days:
     {CACHE_FORECAST}
     
-    **Rules:**
-    1. Answer based on the data above.
-    2. If predicted wind > 30 km/h: Be apologetic and warn that the boat is cancelled due to high waves.
-    3. If predicted wind < 30 km/h: Be cheerful and say it's a perfect day for sailing!
-    4. Keep answers short, nautical, and use emojis like 🌊, 🚤, ⚓.
+    Instructions:
+    1. If wind > 30 km/h: Warn that the boat is cancelled.
+    2. If wind < 30 km/h: Say it's safe to sail.
+    3. Keep it short and use emojis (🌊, 🚤).
     """
-
-    messages = []
-    messages.append({"role": "system", "content": system_prompt})
     
-    # Append history
+    messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
-    messages.append({"role": "user", "content": message})
+    messages.append({"role": "user", "content": str(message)})
 
-    partial_message = ""
+    # 2. 关键修改：手动请求 router.huggingface.co
+    # 这避开了 api-inference.huggingface.co 的 410 错误
+    api_url = "https://router.huggingface.co/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {os.environ.get('HF_TOKEN')}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "Qwen/Qwen2.5-7B-Instruct",
+        "messages": messages,
+        "max_tokens": 500,
+        "stream": False
+    }
+
     try:
-        for token in client.chat_completion(messages, max_tokens=500, stream=True):
-            if token.choices[0].delta.content:
-                partial_message += token.choices[0].delta.content
-                yield partial_message
+        response = requests.post(api_url, headers=headers, json=payload, timeout=20)
+        
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            return f"⚠️ API Error {response.status_code}: {response.text}"
+            
     except Exception as e:
-        yield f"⚠️ Error: {str(e)}"
+        return f"⚠️ Connection Error: {str(e)}"
 
 # ==========================================
-# 🎨 Gradio 界面
+# 🎨 UI
 # ==========================================
 demo = gr.ChatInterface(
     fn=chatbot_response,
@@ -145,7 +147,8 @@ demo = gr.ChatInterface(
         "Is the weather good for sailing this weekend?",
         "What if the wind is too strong?",
     ],
-    cache_examples=False
+    cache_examples=False,
+    type="messages"  # Gradio 5.x 新参数，兼容性更好
 )
 
 if __name__ == "__main__":
