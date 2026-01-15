@@ -1,8 +1,7 @@
 # 🚤 Flores-Corvo Boat Forecaster (Captain Joao)
 **ID2223 Scalable Machine Learning Final Project**
 
-[![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)]
-(https://f124b88f7dc56bb60e.gradio.live)
+[![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/wenboxia/azores-boat-bot)
 
 ## 👤 Author Information
 * **Name:** Wenbo Xia
@@ -64,7 +63,7 @@ The project follows a Serverless MLOps architecture:
 
 ## 🚀 Live Demo
 Access the running application on Hugging Face Spaces here:
-👉 **[https://f124b88f7dc56bb60e.gradio.live]**
+👉 **[https://huggingface.co/spaces/wenboxia/azores-boat-bot]**
 
 ## 🤖 The "Captain Joao" Persona (Interactive AI)
 Instead of showing a boring table of wind speeds, this project uses **Context-Aware Generation**.
