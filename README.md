@@ -1,4 +1,4 @@
-# 🚤 Flores-Corvo Boat Forecaster (Captain Joao)
+# 🚤 AI Azores: Predictive Weather & Boat Bot
 **ID2223 Scalable Machine Learning Final Project**
 
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)]
